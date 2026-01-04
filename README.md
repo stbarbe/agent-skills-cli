@@ -211,7 +211,17 @@ agent-skills-cli/
 
 ---
 
-## 📄 License
+## � Author
+
+**Karanjot Singh**
+
+- 🐦 **X (Twitter):** [@Karanjotdulay](https://x.com/Karanjotdulay)
+- 💼 **LinkedIn:** [Karanjot Singh](https://www.linkedin.com/in/karanjot786/)
+- 🐙 **GitHub:** [@Karanjot786](https://github.com/Karanjot786)
+
+---
+
+## �📄 License
 
 MIT © [Karanjot786](https://github.com/Karanjot786)
 
@@ -222,5 +232,7 @@ MIT © [Karanjot786](https://github.com/Karanjot786)
 **Built for developers who use multiple AI coding assistants.**
 
 [SkillsMP](https://skillsmp.com) · [Report Bug](https://github.com/Karanjot786/agent-skills-cli/issues) · [Request Feature](https://github.com/Karanjot786/agent-skills-cli/issues)
+
+[X (Twitter)](https://x.com/Karanjotdulay) · [LinkedIn](https://www.linkedin.com/in/karanjot786/)
 
 </div>
