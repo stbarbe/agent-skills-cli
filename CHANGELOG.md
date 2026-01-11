@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.3] - 2026-01-11
+
+### 🌐 Website Launch
+- Official website launched at [agentskills.in](https://agentskills.in)
+- Browse 50,000+ skills in the marketplace
+- Full documentation with interactive examples
+- SEO & GEO optimized for AI search engines
+
+### 🎯 Platform Targeting
+- New `-t/--target` flag for installing to specific platforms
+- Positional platform arguments: `skills install pdf claude cursor`
+- `--all` flag to install to all platforms at once
+- Auto-detection improvements for installed platforms
+
+### 🔧 Improvements
+- Fixed Antigravity installation to copy all skill files (including subdirectories)
+- Updated API to use production endpoint
+- Improved README documentation
+
+---
+
 ## [1.0.0] - 2026-01-04
 
 ### 🚀 Initial Release

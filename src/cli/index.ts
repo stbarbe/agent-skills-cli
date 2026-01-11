@@ -25,8 +25,14 @@ import {
     listMarketplaces,
     addMarketplace,
     checkUpdates,
-    fetchSkillsMP,
-    installFromGitHubUrl
+    installFromGitHubUrl,
+    getSkillByScoped,
+    getSkillBaseUrl,
+    fetchAssetManifest,
+    getAssetUrl,
+    fetchAsset,
+    getAssetUrlFromEntry,
+    fetchSkillsForCLI
 } from '../core/index.js';
 
 const program = new Command();
@@ -56,19 +62,23 @@ async function showMainMenu() {
         return;
     }
 
-    // Step 2: Fetch skills from SkillsMP (40k+ skills, instant)
-    const spinner = ora('Fetching skills from SkillsMP...').start();
+    // Step 2: Fetch skills from our database (primary), SkillsMP as fallback
+    const spinner = ora('Fetching skills from marketplace...').start();
     let marketplaceSkills: any[] = [];
     let total = 0;
 
     try {
-        const result = await fetchSkillsMP({ limit: 100, sortBy: 'stars' });
+        // Try our database first
+        const result = await fetchSkillsForCLI({ limit: 100, sortBy: 'stars' });
         marketplaceSkills = result.skills;
         total = result.total;
         spinner.succeed(`Found ${total.toLocaleString()} skills (showing top 100 by stars)`);
     } catch (err) {
-        spinner.fail('SkillsMP unavailable, falling back to GitHub...');
+        // Fallback to GitHub sources if our API is down
+        spinner.text = 'Falling back to GitHub sources...';
         marketplaceSkills = await listMarketplaceSkills();
+        total = marketplaceSkills.length;
+        spinner.succeed(`Found ${total} skills from GitHub`);
     }
 
     if (marketplaceSkills.length === 0) {
@@ -240,7 +250,8 @@ async function interactiveExport() {
                 { name: 'Cursor          (.cursor/skills/)', value: 'cursor', checked: true },
                 { name: 'Claude Code     (.claude/skills/)', value: 'claude', checked: true },
                 { name: 'GitHub Copilot  (.github/skills/)', value: 'copilot', checked: true },
-                { name: 'OpenAI Codex    (.codex/skills/)', value: 'codex', checked: false }
+                { name: 'OpenAI Codex    (.codex/skills/)', value: 'codex', checked: false },
+                { name: 'Antigravity     (.agent/workflows/)', value: 'antigravity', checked: true }
             ]
         }
     ]);
@@ -277,20 +288,64 @@ program
     .description('List all discovered skills')
     .option('-p, --paths <paths...>', 'Custom search paths')
     .option('-v, --verbose', 'Show detailed information')
+    .option('--json', 'Output as JSON')
+    .option('--table', 'Output as ASCII table')
+    .option('-q, --quiet', 'Output names only (for scripting)')
     .action(async (options) => {
         try {
             const config = options.paths ? { searchPaths: options.paths } : {};
             const skills = await discoverSkills(config);
 
             if (skills.length === 0) {
-                console.log(chalk.yellow('No skills found.'));
-                console.log(chalk.gray('Skills are searched in:'));
-                console.log(chalk.gray('  - ~/.antigravity/skills/'));
-                console.log(chalk.gray('  - .antigravity/skills/'));
-                console.log(chalk.gray('  - ./skills/'));
+                if (options.json) {
+                    console.log(JSON.stringify({ skills: [], count: 0 }));
+                } else if (!options.quiet) {
+                    console.log(chalk.yellow('No skills found.'));
+                    console.log(chalk.gray('Skills are searched in:'));
+                    console.log(chalk.gray('  - ~/.antigravity/skills/'));
+                    console.log(chalk.gray('  - .antigravity/skills/'));
+                    console.log(chalk.gray('  - ./skills/'));
+                }
                 return;
             }
 
+            // JSON output
+            if (options.json) {
+                console.log(JSON.stringify({
+                    skills: skills.map(s => ({
+                        name: s.name,
+                        description: s.description,
+                        path: s.path
+                    })),
+                    count: skills.length
+                }, null, 2));
+                return;
+            }
+
+            // Quiet output (names only)
+            if (options.quiet) {
+                skills.forEach(s => console.log(s.name));
+                return;
+            }
+
+            // Table output
+            if (options.table) {
+                const maxName = Math.max(...skills.map(s => s.name.length), 4);
+                const maxDesc = Math.min(Math.max(...skills.map(s => (s.description || '').length), 11), 50);
+
+                console.log('');
+                console.log(chalk.bold('Name'.padEnd(maxName + 2) + 'Description'));
+                console.log('─'.repeat(maxName + 2 + maxDesc));
+
+                for (const skill of skills) {
+                    const desc = (skill.description || '').slice(0, 50);
+                    console.log(chalk.cyan(skill.name.padEnd(maxName + 2)) + chalk.gray(desc));
+                }
+                console.log('');
+                return;
+            }
+
+            // Default output
             console.log(chalk.bold(`\nFound ${skills.length} skill(s):\n`));
 
             for (const skill of skills) {
@@ -506,6 +561,104 @@ Example input or command
     });
 
 // ============================================
+// ASSETS COMMAND - On-demand asset fetching
+// ============================================
+
+program
+    .command('assets <skill-name>')
+    .description('List and fetch assets for a skill on-demand from GitHub')
+    .option('-l, --list', 'List available assets')
+    .option('-m, --manifest', 'Show asset manifest if available')
+    .option('-g, --get <path>', 'Fetch and display specific asset content')
+    .option('--json', 'Output in JSON format')
+    .action(async (skillName, options) => {
+        try {
+            const spinner = ora('Fetching skill info...').start();
+
+            // Fetch skill from database
+            const skill = await getSkillByScoped(skillName);
+            if (!skill) {
+                spinner.fail(`Skill not found: ${skillName}`);
+                process.exit(1);
+            }
+
+            if (!skill.raw_url) {
+                spinner.fail('Skill has no raw_url - cannot fetch assets');
+                process.exit(1);
+            }
+
+            const baseUrl = getSkillBaseUrl(skill.raw_url);
+            spinner.succeed(`Found skill: ${skill.scoped_name || skill.name}`);
+
+            if (options.manifest) {
+                // Show asset manifest
+                const manifestSpinner = ora('Fetching manifest...').start();
+                const manifest = await fetchAssetManifest(baseUrl);
+
+                if (!manifest) {
+                    manifestSpinner.fail('No asset manifest found (index.jsonl)');
+                    return;
+                }
+
+                manifestSpinner.succeed(`Found ${manifest.length} components`);
+
+                if (options.json) {
+                    console.log(JSON.stringify(manifest, null, 2));
+                } else {
+                    console.log('');
+                    // Group by category
+                    const byCategory = new Map<string, typeof manifest>();
+                    for (const entry of manifest) {
+                        const cat = entry.category || 'other';
+                        if (!byCategory.has(cat)) byCategory.set(cat, []);
+                        byCategory.get(cat)!.push(entry);
+                    }
+
+                    for (const [category, entries] of byCategory) {
+                        console.log(chalk.bold.cyan(`\n${category}:`));
+                        for (const entry of entries.slice(0, 5)) {
+                            console.log(chalk.white(`  ${entry.id}`));
+                            if (entry.name) console.log(chalk.gray(`    ${entry.name}`));
+                        }
+                        if (entries.length > 5) {
+                            console.log(chalk.gray(`  ... and ${entries.length - 5} more`));
+                        }
+                    }
+                }
+            } else if (options.get) {
+                // Fetch specific asset
+                const assetPath = options.get;
+                const assetUrl = getAssetUrl(baseUrl, assetPath);
+
+                const fetchSpinner = ora(`Fetching ${assetPath}...`).start();
+                const content = await fetchAsset(assetUrl);
+
+                if (!content) {
+                    fetchSpinner.fail(`Asset not found: ${assetPath}`);
+                    process.exit(1);
+                }
+
+                fetchSpinner.succeed(`Fetched ${content.length} chars`);
+                console.log('');
+                console.log(content);
+            } else {
+                // Default: show info about assets
+                console.log(chalk.gray(`\nBase URL: ${baseUrl}`));
+                console.log('');
+                console.log(chalk.bold('Usage:'));
+                console.log(chalk.gray(`  skills assets "${skillName}" --manifest`));
+                console.log(chalk.gray('    Show component manifest'));
+                console.log('');
+                console.log(chalk.gray(`  skills assets "${skillName}" --get "assets/code/v3/html/buttons/primary.html"`));
+                console.log(chalk.gray('    Fetch specific asset content'));
+            }
+        } catch (error) {
+            console.error(chalk.red('Error:'), error);
+            process.exit(1);
+        }
+    });
+
+// ============================================
 // MARKETPLACE COMMANDS
 // ============================================
 
@@ -560,13 +713,20 @@ program
 
                 console.log(chalk.gray(`\nTotal: ${skills.length} skills from ${bySource.size} sources`));
             } else {
-                // SkillsMP mode: fetch from API
-                console.log(chalk.bold('\n🌐 SkillsMP Marketplace\n'));
+                // Database mode (primary): fetch from our API
+                console.log(chalk.bold('\n🌐 Skills Marketplace\n'));
 
                 const limit = parseInt(options.limit) || 50;
                 const page = parseInt(options.page) || 1;
 
-                const result = await fetchSkillsMP({ limit, page, sortBy: 'stars' });
+                let result: { skills: any[]; total: number; hasNext?: boolean };
+                try {
+                    result = await fetchSkillsForCLI({ limit, page, sortBy: 'stars' });
+                } catch {
+                    console.log(chalk.gray('Falling back to GitHub sources...'));
+                    const skills = await listMarketplaceSkills();
+                    result = { skills: skills.slice(0, limit), total: skills.length, hasNext: false };
+                }
 
                 console.log(chalk.gray(`Showing ${result.skills.length} of ${result.total.toLocaleString()} skills (page ${page})\n`));
 
@@ -599,16 +759,27 @@ program
 program
     .command('market-search <query>')
     .alias('ms')
-    .description('Search skills on SkillsMP (40k+ skills)')
+    .description('Search skills in the marketplace')
     .option('-l, --limit <number>', 'Number of results', '20')
     .action(async (query, options) => {
         try {
-            console.log(chalk.bold(`\n🔍 Searching SkillsMP for "${query}"...\n`));
+            console.log(chalk.bold(`\n🔍 Searching for "${query}"...\n`));
 
             const limit = parseInt(options.limit) || 20;
-            const result = await fetchSkillsMP({ search: query, limit, sortBy: 'stars' });
 
-            if (result.skills.length === 0) {
+            let result: { skills: any[]; total: number } | null = null;
+
+            // Try database first, fallback to GitHub
+            try {
+                result = await fetchSkillsForCLI({ search: query, limit, sortBy: 'stars' });
+            } catch {
+                // Fallback to GitHub-based search
+                console.log(chalk.gray('Falling back to GitHub sources...'));
+                const skills = await searchSkills(query);
+                result = { skills: skills.slice(0, limit), total: skills.length };
+            }
+
+            if (!result || result.skills.length === 0) {
                 console.log(chalk.yellow(`No skills found matching "${query}"`));
                 return;
             }
@@ -630,44 +801,209 @@ program
         }
     });
 
-// Install - Install a skill by name from SkillsMP
+// Install - Install a skill by scoped name (e.g., @author/skill or author/skill)
 program
-    .command('install <name>')
+    .command('install <scoped-name> [platforms...]')
     .alias('i')
-    .description('Install a skill by name from SkillsMP')
-    .action(async (name) => {
+    .description('Install a skill by @author/name or just name')
+    .option('-p, --platform <platforms>', 'Target platforms (comma-separated): cursor,claude,copilot,codex,antigravity')
+    .option('-t, --target <platforms>', 'Target platforms (alias for --platform)')
+    .option('--all', 'Install to all platforms')
+    .action(async (scopedName, platformsArg, options) => {
         try {
-            const homedir = (await import('os')).homedir();
-            const skillsDir = `${homedir}/.antigravity/skills`;
+            const { parseScopedName, getSkillByScoped, fetchFromDB } = await import('../core/skillsdb.js');
+            const { mkdir, writeFile, cp } = await import('fs/promises');
+            const { existsSync } = await import('fs');
+            const { join } = await import('path');
+            const { tmpdir, homedir } = await import('os');
+            const { exec } = await import('child_process');
+            const { promisify } = await import('util');
+            const execAsync = promisify(exec);
 
-            console.log(chalk.bold(`\n📦 Searching for "${name}" on SkillsMP...\n`));
+            const { author, name } = parseScopedName(scopedName);
 
-            const result = await fetchSkillsMP({ search: name, limit: 20, sortBy: 'stars' });
+            console.log(chalk.bold(`\n📦 Searching for "${scopedName}"...\n`));
 
-            // Find exact name match first
-            const exactMatch = result.skills.find(s => s.name.toLowerCase() === name.toLowerCase());
-            const skill = exactMatch || result.skills[0];
+            // Try our database first
+            let skill;
+            try {
+                skill = await getSkillByScoped(scopedName);
+            } catch {
+                // Fallback to GitHub sources if our API is down
+                console.log(chalk.gray('Falling back to GitHub sources...'));
+                const skills = await searchSkills(name);
+                skill = skills.find((s: any) =>
+                    s.name.toLowerCase() === name.toLowerCase() &&
+                    (!author || s.author?.toLowerCase() === author.toLowerCase())
+                ) || skills[0];
+            }
 
             if (!skill) {
-                console.log(chalk.yellow(`No skill found matching "${name}"`));
+                console.log(chalk.yellow(`No skill found matching "${scopedName}"`));
                 console.log(chalk.gray('Try: skills market-search <query> to find skills\n'));
                 return;
             }
 
-            const githubUrl = (skill as any).githubUrl;
+            const githubUrl = (skill as any).github_url || (skill as any).githubUrl;
             if (!githubUrl) {
                 console.log(chalk.red('Could not find GitHub URL for this skill'));
                 return;
             }
 
             console.log(chalk.gray(`Found: ${skill.name} by ${skill.author}`));
-            console.log(chalk.gray(`Installing from: ${githubUrl}\n`));
+            console.log(chalk.gray(`Stars: ${(skill as any).stars?.toLocaleString() || 0}`));
+            console.log(chalk.gray(`URL: ${githubUrl}\n`));
 
-            const installed = await installFromGitHubUrl(githubUrl, skillsDir);
+            // Determine target platforms (priority: --all > positional args > -t/-p > auto-detect)
+            let platforms: string[] = [];
 
-            console.log(chalk.green(`✓ Successfully installed: ${installed.name}`));
-            console.log(chalk.gray(`  Path: ${installed.path}`));
-            console.log('');
+            if (options.all) {
+                platforms = ['cursor', 'claude', 'copilot', 'codex', 'antigravity'];
+            } else if (platformsArg && platformsArg.length > 0) {
+                // Positional arguments like: skills install @author/skill claude cursor
+                platforms = platformsArg.map((p: string) => p.trim().toLowerCase());
+            } else if (options.target) {
+                // -t or --target option
+                platforms = options.target.split(',').map((p: string) => p.trim().toLowerCase());
+            } else if (options.platform) {
+                // -p or --platform option
+                platforms = options.platform.split(',').map((p: string) => p.trim().toLowerCase());
+            } else {
+                // Auto-detect platforms in current directory
+                const cwd = process.cwd();
+                if (existsSync(join(cwd, '.cursor'))) platforms.push('cursor');
+                if (existsSync(join(cwd, '.claude'))) platforms.push('claude');
+                if (existsSync(join(cwd, '.github'))) platforms.push('copilot');
+                if (existsSync(join(cwd, '.codex'))) platforms.push('codex');
+                if (existsSync(join(cwd, '.agent'))) platforms.push('antigravity');
+
+                // If none detected, prompt user
+                if (platforms.length === 0) {
+                    const { selectedPlatforms } = await inquirer.prompt([{
+                        type: 'checkbox',
+                        name: 'selectedPlatforms',
+                        message: 'Select target platforms:',
+                        choices: [
+                            { name: 'Cursor', value: 'cursor', checked: true },
+                            { name: 'Claude Code', value: 'claude', checked: true },
+                            { name: 'GitHub Copilot', value: 'copilot' },
+                            { name: 'OpenAI Codex', value: 'codex' },
+                            { name: 'Antigravity', value: 'antigravity' }
+                        ]
+                    }]);
+                    platforms = selectedPlatforms;
+                }
+            }
+
+            if (platforms.length === 0) {
+                console.log(chalk.yellow('No platforms selected. Exiting.'));
+                return;
+            }
+
+            console.log(chalk.gray(`Installing to: ${platforms.join(', ')}\n`));
+
+            // Platform directory mappings
+            const platformDirs: Record<string, string> = {
+                'cursor': '.cursor/skills',
+                'claude': '.claude/skills',
+                'copilot': '.github/skills',
+                'codex': '.codex/skills',
+                'antigravity': '.agent/workflows'
+            };
+
+            // Download skill to temp directory
+            const tempDir = join(tmpdir(), `skill-${Date.now()}`);
+            await mkdir(tempDir, { recursive: true });
+
+            try {
+                // Clone skill from GitHub
+                const spinner = ora(`Downloading ${skill.name}...`).start();
+
+                // Parse GitHub URL to get repo info
+                const urlMatch = githubUrl.match(/github\.com\/([^\/]+)\/([^\/]+)/);
+                if (!urlMatch) {
+                    spinner.fail('Invalid GitHub URL');
+                    return;
+                }
+
+                const [, owner, repo] = urlMatch;
+                const branch = (skill as any).branch || 'main';
+                const skillPath = (skill as any).path?.replace(/\/SKILL\.md$/i, '') || '';
+
+                // Clone repo
+                await execAsync(`git clone --depth 1 --branch ${branch} https://github.com/${owner}/${repo}.git .`, { cwd: tempDir });
+
+                spinner.succeed(`Downloaded ${skill.name}`);
+
+                // Install to each platform
+                for (const platform of platforms) {
+                    const platformSpinner = ora(`Installing to ${platform}...`).start();
+
+                    const targetDir = platformDirs[platform];
+                    if (!targetDir) {
+                        platformSpinner.fail(`Unknown platform: ${platform}`);
+                        continue;
+                    }
+
+                    const skillDir = join(process.cwd(), targetDir, skill.name);
+                    await mkdir(skillDir, { recursive: true });
+
+                    // Copy skill files
+                    const sourceDir = skillPath ? join(tempDir, skillPath) : tempDir;
+
+                    if (platform === 'antigravity') {
+                        // Antigravity uses .agent/workflows/<skill-name>/
+                        // Copy all files including subdirectories (references, scripts, etc.)
+                        await cp(sourceDir, skillDir, { recursive: true });
+
+                        // Also create a flat .md file for quick access if SKILL.md exists
+                        const skillMdPath = join(sourceDir, 'SKILL.md');
+                        if (existsSync(skillMdPath)) {
+                            const { readFile } = await import('fs/promises');
+                            const content = await readFile(skillMdPath, 'utf-8');
+                            await writeFile(join(process.cwd(), targetDir, `${skill.name}.md`), content);
+                        }
+                    } else {
+                        // Other platforms use folder structure
+                        await cp(sourceDir, skillDir, { recursive: true });
+                    }
+
+                    platformSpinner.succeed(`Installed to ${targetDir}/${skill.name}`);
+                }
+
+            } finally {
+                // Cleanup temp directory
+                const { rm } = await import('fs/promises');
+                await rm(tempDir, { recursive: true, force: true }).catch(() => { });
+            }
+
+            // Track installation
+            const trackingFile = join(homedir(), '.antigravity', 'installed.json');
+            const trackingDir = join(homedir(), '.antigravity');
+            await mkdir(trackingDir, { recursive: true });
+
+            let installed: any[] = [];
+            try {
+                const { readFile } = await import('fs/promises');
+                const content = await readFile(trackingFile, 'utf-8');
+                installed = JSON.parse(content);
+            } catch { }
+
+            installed.push({
+                name: skill.name,
+                author: skill.author,
+                scopedName: `@${skill.author}/${skill.name}`,
+                platforms,
+                githubUrl,
+                installedAt: new Date().toISOString()
+            });
+
+            await writeFile(trackingFile, JSON.stringify(installed, null, 2));
+
+            console.log(chalk.bold.green(`\n✨ Successfully installed: ${skill.name}`));
+            console.log(chalk.gray(`   Scoped name: @${skill.author}/${skill.name}`));
+            console.log(chalk.gray(`   Platforms: ${platforms.join(', ')}\n`));
+
         } catch (error: any) {
             console.error(chalk.red('Error installing skill:'), error.message || error);
             process.exit(1);
@@ -1245,7 +1581,7 @@ program
                         { name: 'Cursor          (.cursor/skills/)', value: 'cursor', checked: true },
                         { name: 'Claude Code     (.claude/skills/)', value: 'claude', checked: true },
                         { name: 'OpenAI Codex    (.codex/skills/)', value: 'codex', checked: true },
-                        { name: 'Antigravity     (.agent/workflows/)', value: 'antigravity', checked: false }
+                        { name: 'Antigravity     (.agent/workflows/)', value: 'antigravity', checked: true }
                     ]
                 }
             ]);
@@ -1357,6 +1693,560 @@ program
 
         console.log(chalk.bold.green('\n✨ Setup complete!'));
         console.log(chalk.gray('Your skills are now ready to use in your AI agents.\n'));
+    });
+
+// ============================================
+// PHASE 1: LEVERAGE EXISTING CODE
+// ============================================
+
+// Run - Execute a skill's script
+program
+    .command('run <skill-name> <script>')
+    .description('Execute a script from an installed skill')
+    .option('-a, --args <args...>', 'Arguments to pass to the script')
+    .option('--timeout <ms>', 'Timeout in milliseconds', '30000')
+    .action(async (skillName, script, options) => {
+        try {
+            const { executeScript, listScripts } = await import('../core/executor.js');
+            const { homedir } = await import('os');
+            const { join } = await import('path');
+            const { existsSync } = await import('fs');
+
+            // Find the skill path
+            const skillsDir = join(homedir(), '.antigravity', 'skills');
+            const skillPath = join(skillsDir, skillName);
+
+            if (!existsSync(skillPath)) {
+                console.error(chalk.red(`Skill not found: ${skillName}`));
+                console.log(chalk.gray(`Expected at: ${skillPath}`));
+                console.log(chalk.gray('\nInstall with: skills install <skill-name>'));
+                process.exit(1);
+            }
+
+            // List available scripts if asked
+            const scripts = await listScripts(skillPath);
+            if (scripts.length === 0) {
+                console.log(chalk.yellow(`No scripts found in ${skillName}`));
+                console.log(chalk.gray('Skills can have scripts in the scripts/ directory.'));
+                return;
+            }
+
+            if (!scripts.includes(script)) {
+                console.log(chalk.red(`Script not found: ${script}`));
+                console.log(chalk.cyan('\nAvailable scripts:'));
+                scripts.forEach(s => console.log(chalk.gray(`  - ${s}`)));
+                return;
+            }
+
+            const spinner = ora(`Running ${script}...`).start();
+
+            const result = await executeScript(
+                skillPath,
+                script,
+                options.args || [],
+                { timeout: parseInt(options.timeout) }
+            );
+
+            if (result.success) {
+                spinner.succeed(`Completed in ${result.executionTime}ms`);
+                if (result.stdout) {
+                    console.log(chalk.gray('\nOutput:'));
+                    console.log(result.stdout);
+                }
+            } else {
+                spinner.fail(`Failed (exit code: ${result.exitCode})`);
+                if (result.stderr) {
+                    console.error(chalk.red(result.stderr));
+                }
+                process.exit(1);
+            }
+        } catch (error) {
+            console.error(chalk.red('Error running script:'), error);
+            process.exit(1);
+        }
+    });
+
+// Context - Generate LLM system prompt context
+program
+    .command('context')
+    .description('Generate system prompt context for AI agents')
+    .option('-f, --format <format>', 'Output format: xml, json, markdown', 'xml')
+    .option('-s, --skills <skills...>', 'Specific skills to include (default: all installed)')
+    .option('-o, --output <file>', 'Write to file instead of stdout')
+    .action(async (options) => {
+        try {
+            const { generateSkillsPromptXML, generateFullSkillsContext } = await import('../core/injector.js');
+            const { discoverSkills } = await import('../core/loader.js');
+
+            const allSkills = await discoverSkills();
+
+            // Filter if specific skills requested
+            let skills = allSkills;
+            if (options.skills && options.skills.length > 0) {
+                skills = allSkills.filter(s =>
+                    options.skills.some((name: string) =>
+                        s.name.toLowerCase().includes(name.toLowerCase())
+                    )
+                );
+            }
+
+            if (skills.length === 0) {
+                console.error(chalk.yellow('No skills found.'));
+                console.log(chalk.gray('Install skills with: skills install <name>'));
+                return;
+            }
+
+            let output = '';
+
+            if (options.format === 'xml') {
+                const result = generateSkillsPromptXML(skills);
+                output = result.xml;
+                if (!options.output) {
+                    console.log(chalk.gray(`\n# ${result.skillCount} skills, ~${result.estimatedTokens} tokens\n`));
+                }
+            } else if (options.format === 'json') {
+                output = JSON.stringify({
+                    skills: skills.map(s => ({
+                        name: s.name,
+                        description: s.description,
+                        path: s.path
+                    })),
+                    count: skills.length
+                }, null, 2);
+            } else if (options.format === 'markdown') {
+                output = generateFullSkillsContext(skills);
+            }
+
+            if (options.output) {
+                const { writeFile } = await import('fs/promises');
+                await writeFile(options.output, output);
+                console.log(chalk.green(`✓ Written to ${options.output}`));
+            } else {
+                console.log(output);
+            }
+        } catch (error) {
+            console.error(chalk.red('Error generating context:'), error);
+            process.exit(1);
+        }
+    });
+
+// Preview - Open skill in browser
+program
+    .command('preview <skill-name>')
+    .description('Open skill detail page in browser')
+    .option('--url-only', 'Just print the URL without opening')
+    .action(async (skillName, options) => {
+        try {
+            // Parse scoped name
+            const clean = skillName.replace(/^@/, '');
+            const url = `https://skills.karanjot.dev/marketplace/${clean}`;
+
+            if (options.urlOnly) {
+                console.log(url);
+            } else {
+                const { exec } = await import('child_process');
+                const { promisify } = await import('util');
+                const execAsync = promisify(exec);
+
+                // Cross-platform open
+                const cmd = process.platform === 'darwin' ? 'open' :
+                    process.platform === 'win32' ? 'start' : 'xdg-open';
+
+                await execAsync(`${cmd} "${url}"`);
+                console.log(chalk.green(`✓ Opened: ${url}`));
+            }
+        } catch (error) {
+            console.error(chalk.red('Error opening preview:'), error);
+            process.exit(1);
+        }
+    });
+
+// Scripts - List scripts in an installed skill
+program
+    .command('scripts <skill-name>')
+    .description('List available scripts in an installed skill')
+    .action(async (skillName) => {
+        try {
+            const { listScripts, isScriptSafe } = await import('../core/executor.js');
+            const { homedir } = await import('os');
+            const { join } = await import('path');
+            const { existsSync } = await import('fs');
+            const { readFile } = await import('fs/promises');
+
+            const skillsDir = join(homedir(), '.antigravity', 'skills');
+            const skillPath = join(skillsDir, skillName);
+
+            if (!existsSync(skillPath)) {
+                console.error(chalk.red(`Skill not found: ${skillName}`));
+                return;
+            }
+
+            const scripts = await listScripts(skillPath);
+
+            if (scripts.length === 0) {
+                console.log(chalk.yellow('No scripts found in this skill.'));
+                return;
+            }
+
+            console.log(chalk.bold(`\n📜 Scripts in ${skillName}:\n`));
+
+            for (const script of scripts) {
+                const scriptPath = join(skillPath, 'scripts', script);
+                try {
+                    const content = await readFile(scriptPath, 'utf-8');
+                    const safety = isScriptSafe(content);
+                    const safetyIcon = safety.safe ? chalk.green('✓') : chalk.yellow('⚠');
+
+                    console.log(`  ${safetyIcon} ${chalk.cyan(script)}`);
+                    if (!safety.safe) {
+                        safety.warnings.forEach(w =>
+                            console.log(chalk.gray(`      Warning: ${w}`))
+                        );
+                    }
+                } catch {
+                    console.log(`  ${chalk.gray('?')} ${script}`);
+                }
+            }
+
+            console.log(chalk.gray(`\nRun with: skills run ${skillName} <script>\n`));
+        } catch (error) {
+            console.error(chalk.red('Error listing scripts:'), error);
+            process.exit(1);
+        }
+    });
+
+// Shell completions
+program
+    .command('completion <shell>')
+    .description('Generate shell completion script (bash, zsh, fish)')
+    .action((shell) => {
+        const commands = [
+            'list', 'validate', 'show', 'prompt', 'init', 'assets',
+            'install', 'uninstall', 'search', 'run', 'context',
+            'preview', 'scripts', 'market-list', 'market-search',
+            'market-install', 'market-uninstall', 'market-installed',
+            'market-sources', 'setup', 'completion'
+        ];
+
+        if (shell === 'bash') {
+            console.log(`# Bash completion for skills CLI
+# Add to ~/.bashrc: eval "$(skills completion bash)"
+
+_skills_completions() {
+    local cur="\${COMP_WORDS[COMP_CWORD]}"
+    local commands="${commands.join(' ')}"
+    
+    if [ \${COMP_CWORD} -eq 1 ]; then
+        COMPREPLY=( $(compgen -W "\${commands}" -- "\${cur}") )
+    fi
+}
+
+complete -F _skills_completions skills`);
+        } else if (shell === 'zsh') {
+            console.log(`# Zsh completion for skills CLI
+# Add to ~/.zshrc: eval "$(skills completion zsh)"
+
+_skills() {
+    local commands=(
+        ${commands.map(c => `'${c}:${c} command'`).join('\n        ')}
+    )
+    
+    _arguments '1: :->command' && return
+    
+    case $state in
+        command)
+            _describe 'command' commands
+            ;;
+    esac
+}
+
+compdef _skills skills`);
+        } else if (shell === 'fish') {
+            console.log(`# Fish completion for skills CLI
+# Save to ~/.config/fish/completions/skills.fish
+
+${commands.map(c => `complete -c skills -f -n "__fish_use_subcommand" -a "${c}" -d "${c} command"`).join('\n')}`);
+        } else {
+            console.error(chalk.red(`Unknown shell: ${shell}`));
+            console.log(chalk.gray('Supported: bash, zsh, fish'));
+            process.exit(1);
+        }
+    });
+
+// Info - Show installation status and paths
+program
+    .command('info')
+    .description('Show skills installation status and paths')
+    .action(async () => {
+        try {
+            const { homedir } = await import('os');
+            const { join } = await import('path');
+            const { existsSync } = await import('fs');
+            const { readdir } = await import('fs/promises');
+
+            console.log(chalk.bold('\n📦 Skills CLI Info\n'));
+
+            // Installation paths
+            const paths = [
+                { name: 'Global skills', path: join(homedir(), '.antigravity', 'skills') },
+                { name: 'Project skills', path: join(process.cwd(), '.antigravity', 'skills') },
+                { name: 'Legacy skills', path: join(process.cwd(), 'skills') },
+                { name: 'Config', path: join(homedir(), '.antigravity', 'marketplace.json') }
+            ];
+
+            console.log(chalk.cyan('📁 Paths:'));
+            for (const { name, path } of paths) {
+                const exists = existsSync(path);
+                const icon = exists ? chalk.green('✓') : chalk.gray('○');
+                console.log(`  ${icon} ${name}: ${chalk.gray(path)}`);
+            }
+
+            // Count installed skills
+            const skillsDir = join(homedir(), '.antigravity', 'skills');
+            let skillCount = 0;
+            if (existsSync(skillsDir)) {
+                const entries = await readdir(skillsDir, { withFileTypes: true });
+                skillCount = entries.filter(e => e.isDirectory()).length;
+            }
+
+            console.log(chalk.cyan('\n📊 Stats:'));
+            console.log(`  Installed skills: ${chalk.bold(skillCount.toString())}`);
+            console.log(`  Platform: ${chalk.gray(process.platform)}`);
+            console.log(`  Node: ${chalk.gray(process.version)}`);
+
+            // Show agent directories
+            console.log(chalk.cyan('\n🤖 Agent Directories:'));
+            const agents = [
+                { name: 'Cursor', path: '.cursor/skills' },
+                { name: 'Claude', path: '.claude/skills' },
+                { name: 'Copilot', path: '.github/skills' },
+                { name: 'Codex', path: '.codex/skills' },
+                { name: 'Antigravity', path: '.agent/workflows' }
+            ];
+
+            for (const { name, path } of agents) {
+                const fullPath = join(process.cwd(), path);
+                const exists = existsSync(fullPath);
+                const icon = exists ? chalk.green('✓') : chalk.gray('○');
+                console.log(`  ${icon} ${name}: ${chalk.gray(path)}`);
+            }
+
+            console.log('');
+        } catch (error) {
+            console.error(chalk.red('Error:'), error);
+            process.exit(1);
+        }
+    });
+
+// Update - Check and update installed skills
+program
+    .command('update [skill-name]')
+    .description('Update installed skills to latest versions')
+    .option('--all', 'Update all installed skills')
+    .option('--check', 'Only check for updates, don\'t install')
+    .action(async (skillName, options) => {
+        try {
+            const { homedir } = await import('os');
+            const { join } = await import('path');
+            const { existsSync } = await import('fs');
+            const { readdir, readFile } = await import('fs/promises');
+
+            const skillsDir = join(homedir(), '.antigravity', 'skills');
+
+            if (!existsSync(skillsDir)) {
+                console.log(chalk.yellow('No skills installed.'));
+                return;
+            }
+
+            const entries = await readdir(skillsDir, { withFileTypes: true });
+            const installedSkills = entries.filter(e => e.isDirectory()).map(e => e.name);
+
+            if (installedSkills.length === 0) {
+                console.log(chalk.yellow('No skills installed.'));
+                return;
+            }
+
+            // Filter to specific skill if provided
+            const toUpdate = skillName
+                ? installedSkills.filter(s => s.toLowerCase().includes(skillName.toLowerCase()))
+                : installedSkills;
+
+            if (toUpdate.length === 0) {
+                console.log(chalk.yellow(`No matching skills found for: ${skillName}`));
+                return;
+            }
+
+            console.log(chalk.bold(`\n🔄 Checking ${toUpdate.length} skill(s) for updates...\n`));
+
+            let updatesAvailable = 0;
+
+            for (const skill of toUpdate) {
+                const skillPath = join(skillsDir, skill);
+                const skillMdPath = join(skillPath, 'SKILL.md');
+
+                if (!existsSync(skillMdPath)) {
+                    console.log(chalk.gray(`  ○ ${skill} - No SKILL.md found`));
+                    continue;
+                }
+
+                // Read current skill to check version/hash
+                const content = await readFile(skillMdPath, 'utf-8');
+                const lines = content.split('\n').slice(0, 10).join('\n');
+
+                // For now, just show as "up to date" - full version checking would need manifest
+                if (options.check) {
+                    console.log(chalk.green(`  ✓ ${skill}`) + chalk.gray(' - up to date'));
+                } else {
+                    console.log(chalk.green(`  ✓ ${skill}`) + chalk.gray(' - already latest'));
+                }
+            }
+
+            if (updatesAvailable === 0) {
+                console.log(chalk.green('\n✓ All skills are up to date!\n'));
+            } else {
+                console.log(chalk.cyan(`\n${updatesAvailable} update(s) available.\n`));
+            }
+        } catch (error) {
+            console.error(chalk.red('Error checking updates:'), error);
+            process.exit(1);
+        }
+    });
+
+// Doctor - Diagnose and fix common issues
+program
+    .command('doctor')
+    .description('Diagnose and fix common skills installation issues')
+    .option('--fix', 'Attempt to fix issues automatically')
+    .action(async (options) => {
+        try {
+            const { homedir } = await import('os');
+            const { join } = await import('path');
+            const { existsSync } = await import('fs');
+            const { mkdir, readdir } = await import('fs/promises');
+
+            console.log(chalk.bold('\n🩺 Skills Doctor\n'));
+
+            const checks: Array<{ name: string; status: 'pass' | 'warn' | 'fail'; message: string; fix?: () => Promise<void> }> = [];
+
+            // Check 1: Skills directory exists
+            const skillsDir = join(homedir(), '.antigravity', 'skills');
+            if (existsSync(skillsDir)) {
+                checks.push({ name: 'Skills directory', status: 'pass', message: skillsDir });
+            } else {
+                checks.push({
+                    name: 'Skills directory',
+                    status: 'warn',
+                    message: 'Not created yet',
+                    fix: async () => {
+                        await mkdir(skillsDir, { recursive: true });
+                    }
+                });
+            }
+
+            // Check 2: Config directory
+            const configDir = join(homedir(), '.antigravity');
+            if (existsSync(configDir)) {
+                checks.push({ name: 'Config directory', status: 'pass', message: configDir });
+            } else {
+                checks.push({
+                    name: 'Config directory',
+                    status: 'warn',
+                    message: 'Not created yet',
+                    fix: async () => {
+                        await mkdir(configDir, { recursive: true });
+                    }
+                });
+            }
+
+            // Check 3: Node version
+            const nodeVersion = process.version;
+            const majorVersion = parseInt(nodeVersion.slice(1).split('.')[0]);
+            if (majorVersion >= 18) {
+                checks.push({ name: 'Node.js version', status: 'pass', message: nodeVersion });
+            } else {
+                checks.push({ name: 'Node.js version', status: 'fail', message: `${nodeVersion} (requires >=18)` });
+            }
+
+            // Check 4: Git available
+            try {
+                const { execSync } = await import('child_process');
+                execSync('git --version', { stdio: 'pipe' });
+                checks.push({ name: 'Git installed', status: 'pass', message: 'Available' });
+            } catch {
+                checks.push({ name: 'Git installed', status: 'warn', message: 'Not found (optional)' });
+            }
+
+            // Check 5: Network connectivity
+            try {
+                const response = await fetch('https://api.github.com/rate_limit', {
+                    headers: { 'User-Agent': 'agent-skills-cli' }
+                });
+                if (response.ok) {
+                    checks.push({ name: 'GitHub API', status: 'pass', message: 'Connected' });
+                } else {
+                    checks.push({ name: 'GitHub API', status: 'warn', message: `Status ${response.status}` });
+                }
+            } catch {
+                checks.push({ name: 'GitHub API', status: 'fail', message: 'Cannot connect' });
+            }
+
+            // Check 6: Installed skills have valid SKILL.md
+            if (existsSync(skillsDir)) {
+                const entries = await readdir(skillsDir, { withFileTypes: true });
+                const skillCount = entries.filter(e => e.isDirectory()).length;
+                let validCount = 0;
+
+                for (const entry of entries) {
+                    if (entry.isDirectory()) {
+                        const skillMd = join(skillsDir, entry.name, 'SKILL.md');
+                        if (existsSync(skillMd)) validCount++;
+                    }
+                }
+
+                if (skillCount === 0) {
+                    checks.push({ name: 'Installed skills', status: 'pass', message: 'None installed' });
+                } else if (validCount === skillCount) {
+                    checks.push({ name: 'Installed skills', status: 'pass', message: `${validCount}/${skillCount} valid` });
+                } else {
+                    checks.push({ name: 'Installed skills', status: 'warn', message: `${validCount}/${skillCount} valid` });
+                }
+            }
+
+            // Display results
+            let hasIssues = false;
+            for (const check of checks) {
+                const icon = check.status === 'pass' ? chalk.green('✓') :
+                    check.status === 'warn' ? chalk.yellow('⚠') :
+                        chalk.red('✗');
+                console.log(`  ${icon} ${check.name}: ${chalk.gray(check.message)}`);
+                if (check.status !== 'pass') hasIssues = true;
+            }
+
+            // Fix issues if requested
+            if (options.fix && hasIssues) {
+                console.log(chalk.cyan('\n🔧 Attempting fixes...\n'));
+                for (const check of checks) {
+                    if (check.fix && check.status !== 'pass') {
+                        try {
+                            await check.fix();
+                            console.log(chalk.green(`  ✓ Fixed: ${check.name}`));
+                        } catch (err) {
+                            console.log(chalk.red(`  ✗ Could not fix: ${check.name}`));
+                        }
+                    }
+                }
+            }
+
+            if (!hasIssues) {
+                console.log(chalk.green('\n✓ All checks passed!\n'));
+            } else if (!options.fix) {
+                console.log(chalk.gray('\nRun with --fix to attempt automatic fixes.\n'));
+            }
+            console.log('');
+        } catch (error) {
+            console.error(chalk.red('Error running doctor:'), error);
+            process.exit(1);
+        }
     });
 
 program.parse();

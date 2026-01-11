@@ -65,11 +65,41 @@ export {
     listMarketplaces
 } from './marketplace.js';
 
-// SkillsMP API (40k+ skills)
+// Skills Database API (our Supabase backend - primary source)
 export {
-    fetchSkillsMP,
-    searchSkillsMP,
-    getTopSkills,
-    SKILLSMP_SOURCE,
+    fetchFromDB,
+    getSkillByScoped,
+    searchSkillsDB,
+    getSkillsByAuthor,
+    parseScopedName,
+    fetchSkillsForCLI,
+    searchSkillsForCLI,
     installFromGitHubUrl
-} from './skillsmp.js';
+} from './skillsdb.js';
+
+export type {
+    DBSkill,
+    Asset,
+    SkillsDBResult,
+    FetchOptions,
+    MarketplaceCompatibleSkill,
+    MarketplaceFetchResult
+} from './skillsdb.js';
+
+// On-demand asset fetching
+export {
+    getSkillBaseUrl,
+    getAssetUrl,
+    parseRawUrl,
+    fetchAssetManifest,
+    listAssetsFromGitHub,
+    fetchAsset,
+    fetchAssetBinary,
+    getSkillAssets,
+    getAssetUrlFromEntry
+} from './assets.js';
+
+export type {
+    AssetEntry,
+    AssetFile
+} from './assets.js';

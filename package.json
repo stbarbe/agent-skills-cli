@@ -1,6 +1,6 @@
 {
   "name": "agent-skills-cli",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Universal CLI for Agent Skills - works with Cursor, Claude Code, GitHub Copilot, OpenAI Codex",
   "type": "module",
   "main": "dist/index.js",
@@ -33,7 +33,7 @@
     "type": "git",
     "url": "https://github.com/Karanjot786/agent-skills-cli"
   },
-  "homepage": "https://agentskills.io",
+  "homepage": "https://agentskills.in",
   "engines": {
     "node": ">=18.0.0"
   },

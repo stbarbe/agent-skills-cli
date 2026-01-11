@@ -37,3 +37,7 @@ temp/
 
 # Local skills cache
 .skills-cache/
+
+website/
+indexer/
+visa/

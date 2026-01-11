@@ -25,3 +25,7 @@ coverage/
 # Local test data
 skills/test-skill/
 .antigravity/
+
+website/
+indexer/
+visa/
