@@ -5,7 +5,7 @@
 [![npm version](https://img.shields.io/npm/v/agent-skills-cli)](https://www.npmjs.com/package/agent-skills-cli)
 [![license](https://img.shields.io/npm/l/agent-skills-cli)](LICENSE)
 
-Install skills from the world's largest marketplace and sync them to **Cursor**, **Claude Code**, **GitHub Copilot**, **OpenAI Codex**, and **Antigravity** — all with a single command.
+Install skills from the world's largest marketplace and sync them to **Cursor**, **Claude Code**, **GitHub Copilot**, **OpenAI Codex**, **Antigravity**, **OpenCode**, **Amp**, **Kilo Code**, **Roo Code**, and **Goose** — all with a single command.
 
 🌐 **Website:** [agentskills.in](https://agentskills.in)
 
@@ -19,10 +19,12 @@ skills install @anthropic/xlsx
 ## ✨ Features
 
 - **50,000+ Skills** — Access the largest collection of AI agent skills
-- **5 AI Agents** — Works with Cursor, Claude, Copilot, Codex, Antigravity
+- **10 AI Agents** — Cursor, Claude, Copilot, Codex, Antigravity, OpenCode, Amp, Kilo, Roo, Goose
+- **Global Install** — Install globally with `-g` or to project with default
+- **Git URL Support** — Install from any Git repo with `skills add owner/repo`
 - **Platform Targeting** — Install to specific platforms with `-t claude,cursor`
 - **Auto-Detection** — Automatically detects installed AI agents
-- **Interactive CLI** — Arrow-key navigation, search, and progress spinners
+- **Modern UI** — Beautiful prompts with @clack/prompts
 
 ---
 
@@ -45,14 +47,20 @@ skills install xlsx
 # Install to specific platforms
 skills install @anthropic/pdf -t claude,cursor
 
-# Install to all platforms
+# Install globally (home directory)
+skills install pdf -g -t claude
+
+# Install to all 10 platforms
 skills install docx --all
+
+# Install from Git repo
+skills add vercel-labs/agent-skills
+
+# List skills in a repo
+skills add owner/repo --list
 
 # Search the marketplace
 skills search "machine learning"
-
-# List installed skills
-skills list
 ```
 
 ---
@@ -64,19 +72,32 @@ skills list
 | Command | Description |
 |---------|-------------|
 | `skills install <name>` | Install a skill from marketplace |
+| `skills add <source>` | Install from Git repo (owner/repo or URL) |
 | `skills list` | List installed skills |
 | `skills search <query>` | Search the marketplace |
 | `skills show <name>` | Show skill details |
-| `skills update` | Update installed skills |
 | `skills doctor` | Diagnose issues |
 
 ### Install Options
 
 ```bash
 skills install <name>              # Auto-detect platforms
+skills install <name> -g           # Install globally (~/.claude/skills/)
 skills install <name> -t claude    # Install to Claude only
 skills install <name> -t cursor,copilot  # Install to multiple
-skills install <name> --all        # Install to all platforms
+skills install <name> --all        # Install to all 10 platforms
+skills install <name> --list       # Show details without installing
+```
+
+### Git URL Install (`skills add`)
+
+```bash
+skills add owner/repo              # GitHub shorthand
+skills add https://github.com/user/repo  # Full URL
+skills add https://gitlab.com/org/repo   # GitLab
+skills add owner/repo --list       # List skills in repo
+skills add owner/repo -s skill-name      # Install specific skill
+skills add owner/repo -y -g        # Non-interactive, global
 ```
 
 ### Other Commands
@@ -91,15 +112,20 @@ skills info               # Show installation status
 
 ---
 
-## 🤖 Supported Platforms
+## 🤖 Supported Platforms (10 Agents)
 
-| Platform | Directory | Flag |
-|----------|-----------|------|
-| **Cursor** | `.cursor/skills/` | `-t cursor` |
-| **Claude Code** | `.claude/skills/` | `-t claude` |
-| **GitHub Copilot** | `.github/skills/` | `-t copilot` |
-| **OpenAI Codex** | `.codex/skills/` | `-t codex` |
-| **Antigravity** | `.agent/workflows/` | `-t antigravity` |
+| Platform | Project Dir | Global Dir | Flag |
+|----------|-------------|------------|------|
+| **Cursor** | `.cursor/skills/` | `~/.cursor/skills/` | `-t cursor` |
+| **Claude Code** | `.claude/skills/` | `~/.claude/skills/` | `-t claude` |
+| **GitHub Copilot** | `.github/skills/` | `~/.github/skills/` | `-t copilot` |
+| **OpenAI Codex** | `.codex/skills/` | `~/.codex/skills/` | `-t codex` |
+| **Antigravity** | `.agent/skills/` | `~/.gemini/antigravity/skills/` | `-t antigravity` |
+| **OpenCode** | `.opencode/skill/` | `~/.config/opencode/skill/` | `-t opencode` |
+| **Amp** | `.agents/skills/` | `~/.config/agents/skills/` | `-t amp` |
+| **Kilo Code** | `.kilocode/skills/` | `~/.kilocode/skills/` | `-t kilo` |
+| **Roo Code** | `.roo/skills/` | `~/.roo/skills/` | `-t roo` |
+| **Goose** | `.goose/skills/` | `~/.config/goose/skills/` | `-t goose` |
 
 ---
 

@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.5] - 2026-01-16
+
+### 🌐 Global Install (`-g/--global`)
+- Install skills globally to home directory instead of project-level
+- Works with all commands: `skills install pdf -g -t claude`
+
+### 🤖 5 New Agents (10 Total)
+- **OpenCode** (`.opencode/skill`)
+- **Amp** (`.agents/skills`)
+- **Kilo Code** (`.kilocode/skills`)
+- **Roo Code** (`.roo/skills`)
+- **Goose** (`.goose/skills`)
+
+### 📦 Git URL Support (`skills add`)
+- Install from GitHub/GitLab repos: `skills add owner/repo`
+- Support full URLs and subpaths
+- `--list` to browse skills in repos
+- `--skill` to install specific skills
+- `-y` for non-interactive CI/CD mode
+
+### ✨ UI Improvements
+- Modern UI with @clack/prompts
+- Shows install paths and hints
+- Better cancellation handling
+
+### 🔧 Build Optimization
+- Added `npm run build:fast` using tsup
+- Added @clack/prompts dependency
+
+---
+
 ## [1.0.4] - 2026-01-11
 
 ### ⚡ Parallel Downloads

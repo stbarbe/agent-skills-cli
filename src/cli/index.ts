@@ -8,6 +8,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
 import ora from 'ora';
+import * as p from '@clack/prompts';
 import {
     discoverSkills,
     loadSkill,
@@ -34,33 +35,121 @@ import {
     getAssetUrlFromEntry,
     fetchSkillsForCLI
 } from '../core/index.js';
+import { homedir } from 'os';
+
+// Centralized agent configuration with project and global paths
+const home = homedir();
+interface AgentConfig {
+    name: string;
+    displayName: string;
+    projectDir: string;
+    globalDir: string;
+}
+
+const AGENTS: Record<string, AgentConfig> = {
+    'cursor': {
+        name: 'cursor',
+        displayName: 'Cursor',
+        projectDir: '.cursor/skills',
+        globalDir: `${home}/.cursor/skills`,
+    },
+    'claude': {
+        name: 'claude',
+        displayName: 'Claude Code',
+        projectDir: '.claude/skills',
+        globalDir: `${home}/.claude/skills`,
+    },
+    'copilot': {
+        name: 'copilot',
+        displayName: 'GitHub Copilot',
+        projectDir: '.github/skills',
+        globalDir: `${home}/.github/skills`,
+    },
+    'codex': {
+        name: 'codex',
+        displayName: 'Codex',
+        projectDir: '.codex/skills',
+        globalDir: `${home}/.codex/skills`,
+    },
+    'antigravity': {
+        name: 'antigravity',
+        displayName: 'Antigravity',
+        projectDir: '.agent/skills',
+        globalDir: `${home}/.gemini/antigravity/skills`,
+    },
+    // New agents from add-skill
+    'opencode': {
+        name: 'opencode',
+        displayName: 'OpenCode',
+        projectDir: '.opencode/skill',
+        globalDir: `${home}/.config/opencode/skill`,
+    },
+    'amp': {
+        name: 'amp',
+        displayName: 'Amp',
+        projectDir: '.agents/skills',
+        globalDir: `${home}/.config/agents/skills`,
+    },
+    'kilo': {
+        name: 'kilo',
+        displayName: 'Kilo Code',
+        projectDir: '.kilocode/skills',
+        globalDir: `${home}/.kilocode/skills`,
+    },
+    'roo': {
+        name: 'roo',
+        displayName: 'Roo Code',
+        projectDir: '.roo/skills',
+        globalDir: `${home}/.roo/skills`,
+    },
+    'goose': {
+        name: 'goose',
+        displayName: 'Goose',
+        projectDir: '.goose/skills',
+        globalDir: `${home}/.config/goose/skills`,
+    },
+};
+
+// Helper to get install path
+function getInstallPath(agent: string, global: boolean): string {
+    const config = AGENTS[agent];
+    if (!config) return `.${agent}/skills`;
+    return global ? config.globalDir : config.projectDir;
+}
 
 const program = new Command();
 
 // Main flow when running `skills` - go straight to install
 async function showMainMenu() {
-    console.log(chalk.bold.cyan('\n🚀 Agent Skills CLI\n'));
+    console.log('');
+    p.intro(chalk.bgCyan.black(' Agent Skills CLI '));
 
     // Step 1: Select target agents
-    const { agents } = await inquirer.prompt([
-        {
-            type: 'checkbox',
-            name: 'agents',
-            message: 'Select AI agents to install skills for:',
-            choices: [
-                { name: 'Cursor', value: 'cursor', checked: true },
-                { name: 'Claude Code', value: 'claude', checked: true },
-                { name: 'GitHub Copilot', value: 'copilot', checked: true },
-                { name: 'OpenAI Codex', value: 'codex', checked: false },
-                { name: 'Antigravity', value: 'antigravity', checked: true }
-            ]
-        }
-    ]);
+    const agentChoices = Object.entries(AGENTS).map(([key, config]) => ({
+        label: config.displayName,
+        value: key,
+        hint: config.projectDir,
+    }));
 
-    if (agents.length === 0) {
-        console.log(chalk.yellow('\nNo agents selected. Exiting.\n'));
+    const agents = await p.multiselect({
+        message: 'Select AI agents to install skills for:',
+        options: agentChoices,
+        initialValues: ['cursor', 'claude', 'copilot', 'antigravity'],
+        required: true,
+    });
+
+    if (p.isCancel(agents)) {
+        p.cancel('Installation cancelled');
         return;
     }
+
+    if ((agents as string[]).length === 0) {
+        p.log.warn('No agents selected. Exiting.');
+        return;
+    }
+
+    // Cast to string array for use throughout the function
+    const selectedAgents = agents as string[];
 
     // Step 2: Fetch skills from our database (primary), SkillsMP as fallback
     const spinner = ora('Fetching skills from marketplace...').start();
@@ -116,14 +205,7 @@ async function showMainMenu() {
     // Step 4: Install skills directly to platform directories (like working install command)
     console.log('');
 
-    // Platform directory mappings
-    const platformDirs: Record<string, string> = {
-        'cursor': '.cursor/skills',
-        'claude': '.claude/skills',
-        'copilot': '.github/skills',
-        'codex': '.codex/skills',
-        'antigravity': '.agent/workflows'
-    };
+    // Use centralized AGENTS config for platform directories
 
     // Import dependencies once
     const { getSkillByScoped } = await import('../core/skillsdb.js');
@@ -169,10 +251,11 @@ async function showMainMenu() {
                 await execAsync(`git clone --depth 1 --branch ${branch} https://github.com/${owner}/${repo}.git .`, { cwd: tempDir });
 
                 // Install to each platform
-                for (const platform of agents) {
-                    const targetDir = platformDirs[platform];
-                    if (!targetDir) continue;
+                for (const platform of selectedAgents) {
+                    const agentConfig = AGENTS[platform];
+                    if (!agentConfig) continue;
 
+                    const targetDir = agentConfig.projectDir;
                     const skillDir = join(process.cwd(), targetDir, dbSkill.name);
                     await mkdir(skillDir, { recursive: true });
 
@@ -217,7 +300,7 @@ async function showMainMenu() {
 
     const successCount = results.filter(r => r.success).length;
     if (successCount > 0) {
-        console.log(chalk.bold.green(`\n✨ Successfully installed ${successCount} skill(s) to: ${agents.join(', ')}`));
+        console.log(chalk.bold.green(`\n✨ Successfully installed ${successCount} skill(s) to: ${selectedAgents.join(', ')}`));
     }
 
     console.log('');
@@ -881,7 +964,9 @@ program
     .command('install <scoped-name> [platforms...]')
     .alias('i')
     .description('Install a skill by @author/name or just name')
-    .option('-p, --platform <platforms>', 'Target platforms (comma-separated): cursor,claude,copilot,codex,antigravity')
+    .option('-g, --global', 'Install skill globally (user-level) instead of project-level')
+    .option('-l, --list', 'Show skill details without installing')
+    .option('-p, --platform <platforms>', 'Target platforms (comma-separated): cursor,claude,copilot,codex,antigravity,opencode,amp,kilo,roo,goose')
     .option('-t, --target <platforms>', 'Target platforms (alias for --platform)')
     .option('--all', 'Install to all platforms')
     .action(async (scopedName, platformsArg, options) => {
@@ -927,13 +1012,23 @@ program
 
             console.log(chalk.gray(`Found: ${skill.name} by ${skill.author}`));
             console.log(chalk.gray(`Stars: ${(skill as any).stars?.toLocaleString() || 0}`));
-            console.log(chalk.gray(`URL: ${githubUrl}\n`));
+            console.log(chalk.gray(`URL: ${githubUrl}`));
+            if ((skill as any).description) {
+                console.log(chalk.gray(`Description: ${(skill as any).description}`));
+            }
+            console.log('');
+
+            // If --list flag, just show details and exit
+            if (options.list) {
+                console.log(chalk.cyan('Use without --list to install this skill.\n'));
+                return;
+            }
 
             // Determine target platforms (priority: --all > positional args > -t/-p > auto-detect)
             let platforms: string[] = [];
 
             if (options.all) {
-                platforms = ['cursor', 'claude', 'copilot', 'codex', 'antigravity'];
+                platforms = Object.keys(AGENTS);
             } else if (platformsArg && platformsArg.length > 0) {
                 // Positional arguments like: skills install @author/skill claude cursor
                 platforms = platformsArg.map((p: string) => p.trim().toLowerCase());
@@ -975,16 +1070,10 @@ program
                 return;
             }
 
-            console.log(chalk.gray(`Installing to: ${platforms.join(', ')}\n`));
+            console.log(chalk.gray(`Installing to: ${platforms.join(', ')}${options.global ? ' (global)' : ''}\n`));
 
-            // Platform directory mappings
-            const platformDirs: Record<string, string> = {
-                'cursor': '.cursor/skills',
-                'claude': '.claude/skills',
-                'copilot': '.github/skills',
-                'codex': '.codex/skills',
-                'antigravity': '.agent/workflows'
-            };
+            // Use centralized AGENTS config with global support
+            const isGlobal = !!options.global;
 
             // Download skill to temp directory
             const tempDir = join(tmpdir(), `skill-${Date.now()}`);
@@ -1014,20 +1103,21 @@ program
                 for (const platform of platforms) {
                     const platformSpinner = ora(`Installing to ${platform}...`).start();
 
-                    const targetDir = platformDirs[platform];
-                    if (!targetDir) {
+                    const agentConfig = AGENTS[platform];
+                    if (!agentConfig) {
                         platformSpinner.fail(`Unknown platform: ${platform}`);
                         continue;
                     }
 
-                    const skillDir = join(process.cwd(), targetDir, skill.name);
+                    const targetDir = isGlobal ? agentConfig.globalDir : agentConfig.projectDir;
+                    const skillDir = isGlobal ? join(targetDir, skill.name) : join(process.cwd(), targetDir, skill.name);
                     await mkdir(skillDir, { recursive: true });
 
                     // Copy skill files
                     const sourceDir = skillPath ? join(tempDir, skillPath) : tempDir;
 
                     if (platform === 'antigravity') {
-                        // Antigravity uses .agent/workflows/<skill-name>/
+                        // Antigravity uses .agent/skills/<skill-name>/
                         // Copy all files including subdirectories (references, scripts, etc.)
                         await cp(sourceDir, skillDir, { recursive: true });
 
@@ -1036,7 +1126,8 @@ program
                         if (existsSync(skillMdPath)) {
                             const { readFile } = await import('fs/promises');
                             const content = await readFile(skillMdPath, 'utf-8');
-                            await writeFile(join(process.cwd(), targetDir, `${skill.name}.md`), content);
+                            const flatMdDir = isGlobal ? targetDir : join(process.cwd(), targetDir);
+                            await writeFile(join(flatMdDir, `${skill.name}.md`), content);
                         }
                     } else {
                         // Other platforms use folder structure
@@ -1081,6 +1172,237 @@ program
 
         } catch (error: any) {
             console.error(chalk.red('Error installing skill:'), error.message || error);
+            process.exit(1);
+        }
+    });
+
+// Add - Install skills directly from Git repository URLs
+program
+    .command('add <source>')
+    .description('Install skills from a Git repo (e.g., owner/repo, https://github.com/owner/repo)')
+    .option('-g, --global', 'Install skill globally (user-level) instead of project-level')
+    .option('-l, --list', 'List available skills in the repository without installing')
+    .option('-s, --skill <skills...>', 'Specify skill names to install')
+    .option('-a, --agent <agents...>', 'Specify agents to install to')
+    .option('-y, --yes', 'Skip confirmation prompts')
+    .action(async (source, options) => {
+        try {
+            const { mkdir, cp, rm, readdir, readFile } = await import('fs/promises');
+            const { existsSync, statSync } = await import('fs');
+            const { join, basename, dirname } = await import('path');
+            const { tmpdir } = await import('os');
+            const { exec } = await import('child_process');
+            const { promisify } = await import('util');
+            const execAsync = promisify(exec);
+
+            // Parse source URL
+            function parseSource(input: string): { type: string; url: string; subpath?: string } {
+                // GitHub URL with path: github.com/owner/repo/tree/branch/path
+                const githubTreeMatch = input.match(/github\.com\/([^/]+)\/([^/]+)\/tree\/([^/]+)\/(.+)/);
+                if (githubTreeMatch) {
+                    const [, owner, repo, , subpath] = githubTreeMatch;
+                    return { type: 'github', url: `https://github.com/${owner}/${repo}.git`, subpath };
+                }
+
+                // GitHub URL: github.com/owner/repo
+                const githubRepoMatch = input.match(/github\.com\/([^/]+)\/([^/]+)/);
+                if (githubRepoMatch) {
+                    const [, owner, repo] = githubRepoMatch;
+                    const cleanRepo = repo!.replace(/\.git$/, '');
+                    return { type: 'github', url: `https://github.com/${owner}/${cleanRepo}.git` };
+                }
+
+                // GitLab URL: gitlab.com/owner/repo
+                const gitlabMatch = input.match(/gitlab\.com\/([^/]+)\/([^/]+)/);
+                if (gitlabMatch) {
+                    const [, owner, repo] = gitlabMatch;
+                    const cleanRepo = repo!.replace(/\.git$/, '');
+                    return { type: 'gitlab', url: `https://gitlab.com/${owner}/${cleanRepo}.git` };
+                }
+
+                // GitHub shorthand: owner/repo or owner/repo/path
+                const shorthandMatch = input.match(/^([^/]+)\/([^/]+)(?:\/(.+))?$/);
+                if (shorthandMatch && !input.includes(':')) {
+                    const [, owner, repo, subpath] = shorthandMatch;
+                    return { type: 'github', url: `https://github.com/${owner}/${repo}.git`, subpath };
+                }
+
+                // Fallback: treat as direct git URL
+                return { type: 'git', url: input };
+            }
+
+            // Discover skills in a directory
+            async function discoverSkillsInDir(dir: string, subpath?: string): Promise<{ name: string; description: string; path: string }[]> {
+                const skills: { name: string; description: string; path: string }[] = [];
+                const searchPath = subpath ? join(dir, subpath) : dir;
+
+                const searchDirs = [
+                    searchPath,
+                    join(searchPath, 'skills'),
+                    join(searchPath, '.claude/skills'),
+                    join(searchPath, '.cursor/skills'),
+                    join(searchPath, '.agent/skills'),
+                    join(searchPath, '.codex/skills'),
+                    join(searchPath, '.opencode/skill'),
+                ];
+
+                for (const searchDir of searchDirs) {
+                    if (!existsSync(searchDir)) continue;
+
+                    try {
+                        const entries = await readdir(searchDir, { withFileTypes: true });
+                        for (const entry of entries) {
+                            if (entry.isDirectory()) {
+                                const skillMdPath = join(searchDir, entry.name, 'SKILL.md');
+                                if (existsSync(skillMdPath)) {
+                                    try {
+                                        const content = await readFile(skillMdPath, 'utf-8');
+                                        const nameMatch = content.match(/^name:\s*(.+)$/m);
+                                        const descMatch = content.match(/^description:\s*(.+)$/m);
+                                        skills.push({
+                                            name: nameMatch ? nameMatch[1].trim() : entry.name,
+                                            description: descMatch ? descMatch[1].trim() : '',
+                                            path: join(searchDir, entry.name),
+                                        });
+                                    } catch { }
+                                }
+                            }
+                        }
+                    } catch { }
+                }
+
+                return skills;
+            }
+
+            console.log(chalk.bold('\n📦 add-skill\n'));
+
+            const parsed = parseSource(source);
+            console.log(chalk.gray(`Source: ${parsed.url}${parsed.subpath ? ` (${parsed.subpath})` : ''}`));
+
+            // Clone repository
+            const tempDir = join(tmpdir(), `add-skill-${Date.now()}`);
+            await mkdir(tempDir, { recursive: true });
+
+            const spinner = ora('Cloning repository...').start();
+            try {
+                await execAsync(`git clone --depth 1 ${parsed.url} .`, { cwd: tempDir });
+                spinner.succeed('Repository cloned');
+            } catch (err: any) {
+                spinner.fail('Failed to clone repository');
+                console.error(chalk.red(err.message || err));
+                await rm(tempDir, { recursive: true, force: true }).catch(() => { });
+                return;
+            }
+
+            // Discover skills
+            const discoverSpinner = ora('Discovering skills...').start();
+            const skills = await discoverSkillsInDir(tempDir, parsed.subpath);
+
+            if (skills.length === 0) {
+                discoverSpinner.fail('No skills found');
+                console.log(chalk.yellow('\nNo valid skills found. Skills require a SKILL.md with name and description.'));
+                await rm(tempDir, { recursive: true, force: true }).catch(() => { });
+                return;
+            }
+
+            discoverSpinner.succeed(`Found ${skills.length} skill${skills.length > 1 ? 's' : ''}`);
+
+            // If --list, just show skills and exit
+            if (options.list) {
+                console.log(chalk.bold('\nAvailable Skills:'));
+                for (const skill of skills) {
+                    console.log(chalk.cyan(`  ${skill.name}`));
+                    if (skill.description) {
+                        console.log(chalk.gray(`    ${skill.description}`));
+                    }
+                }
+                console.log(chalk.gray('\nUse --skill <name> to install specific skills\n'));
+                await rm(tempDir, { recursive: true, force: true }).catch(() => { });
+                return;
+            }
+
+            // Select skills to install
+            let selectedSkills = skills;
+            if (options.skill && options.skill.length > 0) {
+                selectedSkills = skills.filter(s =>
+                    options.skill.some((name: string) => s.name.toLowerCase() === name.toLowerCase())
+                );
+                if (selectedSkills.length === 0) {
+                    console.log(chalk.yellow(`No matching skills found for: ${options.skill.join(', ')}`));
+                    await rm(tempDir, { recursive: true, force: true }).catch(() => { });
+                    return;
+                }
+            } else if (!options.yes && skills.length > 1) {
+                // Interactive selection
+                const { selected } = await inquirer.prompt([{
+                    type: 'checkbox',
+                    name: 'selected',
+                    message: 'Select skills to install:',
+                    choices: skills.map(s => ({ name: `${s.name}${s.description ? ` - ${s.description.slice(0, 50)}` : ''}`, value: s, checked: true })),
+                }]);
+                selectedSkills = selected;
+            }
+
+            if (selectedSkills.length === 0) {
+                console.log(chalk.yellow('No skills selected.'));
+                await rm(tempDir, { recursive: true, force: true }).catch(() => { });
+                return;
+            }
+
+            // Select agents
+            let targetAgents: string[] = [];
+            if (options.agent && options.agent.length > 0) {
+                targetAgents = options.agent;
+            } else if (options.yes) {
+                targetAgents = Object.keys(AGENTS);
+            } else {
+                const { agents } = await inquirer.prompt([{
+                    type: 'checkbox',
+                    name: 'agents',
+                    message: 'Select agents to install to:',
+                    choices: Object.entries(AGENTS).map(([key, config]) => ({
+                        name: config.displayName,
+                        value: key,
+                        checked: ['cursor', 'claude', 'antigravity'].includes(key),
+                    })),
+                }]);
+                targetAgents = agents;
+            }
+
+            if (targetAgents.length === 0) {
+                console.log(chalk.yellow('No agents selected.'));
+                await rm(tempDir, { recursive: true, force: true }).catch(() => { });
+                return;
+            }
+
+            const isGlobal = !!options.global;
+
+            // Install skills
+            console.log(chalk.bold('\nInstalling...\n'));
+
+            for (const skill of selectedSkills) {
+                for (const agent of targetAgents) {
+                    const agentConfig = AGENTS[agent];
+                    if (!agentConfig) continue;
+
+                    const targetDir = isGlobal ? agentConfig.globalDir : agentConfig.projectDir;
+                    const skillDir = isGlobal ? join(targetDir, skill.name) : join(process.cwd(), targetDir, skill.name);
+
+                    await mkdir(skillDir, { recursive: true });
+                    await cp(skill.path, skillDir, { recursive: true });
+
+                    console.log(chalk.green(`✔ ${skill.name} → ${agentConfig.displayName}`));
+                    console.log(chalk.gray(`  ${isGlobal ? skillDir : targetDir + '/' + skill.name}`));
+                }
+            }
+
+            console.log(chalk.bold.green(`\n✨ Successfully installed ${selectedSkills.length} skill(s)\n`));
+
+            // Cleanup
+            await rm(tempDir, { recursive: true, force: true }).catch(() => { });
+
+        } catch (error: any) {
+            console.error(chalk.red('Error:'), error.message || error);
             process.exit(1);
         }
     });
